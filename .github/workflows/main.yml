@@ -5,6 +5,7 @@ on:
 
   schedule:
     - cron: "*/10 * * * *"
+      timezone: "Asia/Tehran"
 
 jobs:
   run-bot:

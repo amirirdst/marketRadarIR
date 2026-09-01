@@ -1,6 +1,8 @@
 import json
+import re
 import subprocess
 from datetime import datetime
+from html import unescape
 
 try:
     import jdatetime
@@ -9,12 +11,17 @@ except ImportError:
 
 
 TGJU_URL = "https://call5.tgju.org/ajax.json"
+TGJU_GOLD_OUNCE_URL = "https://gem.tgju.org/profile/forex-xau-usd"
 
 NOBITEX_URL = (
     "https://apiv2.nobitex.ir/market/stats"
     "?srcCurrency={}&dstCurrency=rls"
 )
 
+
+# =========================================================
+# HTTP
+# =========================================================
 
 def fetch_json(url):
     result = subprocess.run(
@@ -35,14 +42,52 @@ def fetch_json(url):
 
     if result.returncode != 0:
         raise RuntimeError(
-            result.stderr.strip() or "خطا در اتصال به سرور"
+            result.stderr.strip() or "خطا در اتصال به منبع داده"
         )
 
     if not result.stdout.strip():
-        raise RuntimeError("پاسخ خالی از سرور دریافت شد")
+        raise RuntimeError("پاسخ خالی از منبع داده دریافت شد")
 
-    return json.loads(result.stdout)
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"پاسخ JSON معتبر نیست: {exc}"
+        ) from exc
 
+
+def fetch_text(url):
+    result = subprocess.run(
+        [
+            "curl",
+            "-4",
+            "-L",
+            "-s",
+            "--connect-timeout",
+            "15",
+            url,
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=20,
+    )
+
+    if result.returncode != 0:
+        raise RuntimeError(
+            result.stderr.strip() or "خطا در دریافت صفحه"
+        )
+
+    if not result.stdout.strip():
+        raise RuntimeError("صفحه خالی دریافت شد")
+
+    return result.stdout
+
+
+# =========================================================
+# NUMBER HELPERS
+# =========================================================
 
 def clean_price(value):
     if value is None:
@@ -50,7 +95,10 @@ def clean_price(value):
 
     try:
         return float(
-            str(value).replace(",", "").strip()
+            str(value)
+            .replace(",", "")
+            .replace(" ", "")
+            .strip()
         )
     except (ValueError, TypeError):
         return None
@@ -72,24 +120,50 @@ def format_number(value):
     return f"{int(round(value)):,}"
 
 
-def format_change(value):
+def format_usd(value):
+    if value is None:
+        return "—"
+
+    return f"{value:,.2f}"
+
+
+# =========================================================
+# CHANGE
+# =========================================================
+
+def get_change_dot(value):
     try:
         change = float(value or 0)
     except (ValueError, TypeError):
-        change = 0
+        change = 0.0
 
     if change > 0:
-        return f"🟢 +{change:.2f}%"
+        return "🟢", f"+{change:.2f}%"
 
     if change < 0:
-        return f"🔴 {change:.2f}%"
+        return "🔴", f"{change:.2f}%"
 
-    return "⚪ 0.00%"
+    return "⚪", "0.00%"
 
 
-# =========================
+def get_crypto_change(value):
+    try:
+        change = float(value or 0)
+    except (ValueError, TypeError):
+        change = 0.0
+
+    if change > 0:
+        return "🟢", "↑", f"+{change:.2f}%"
+
+    if change < 0:
+        return "🔴", "↓", f"{change:.2f}%"
+
+    return "⚪", "", "0.00%"
+
+
+# =========================================================
 # TGJU
-# =========================
+# =========================================================
 
 def get_tgju():
     data = fetch_json(TGJU_URL)
@@ -108,18 +182,64 @@ def tgju_item(data, key):
     }
 
 
-# =========================
+# =========================================================
+# GOLD OUNCE - TGJU
+# =========================================================
+
+def get_gold_ounce():
+    html = fetch_text(TGJU_GOLD_OUNCE_URL)
+
+    text = unescape(html)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text)
+
+    price = None
+
+    patterns = [
+        r"نرخ فعلی\s*:?\s*:?\s*([0-9][0-9,]*\.[0-9]+)",
+        r"نرخ فعلی\s*([0-9][0-9,]*\.[0-9]+)",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text)
+
+        if match:
+            price = clean_price(match.group(1))
+            break
+
+    if price is None:
+        return None
+
+    change = 0.0
+
+    change_patterns = [
+        r"درصد تغییر نسبت به روز گذشته\s*:?\s*([+-]?[0-9]+(?:\.[0-9]+)?)%",
+        r"درصد تغییر نسبت به روز گذشته\s*([+-]?[0-9]+(?:\.[0-9]+)?)%",
+    ]
+
+    for pattern in change_patterns:
+        match = re.search(pattern, text)
+
+        if match:
+            change = float(match.group(1))
+            break
+
+    return {
+        "price": price,
+        "change_percent": change,
+    }
+
+
+# =========================================================
 # NOBITEX
-# =========================
+# =========================================================
 
 def get_nobitex(symbol):
     url = NOBITEX_URL.format(symbol)
 
     data = fetch_json(url)
 
-    item = data.get("stats", {}).get(
-        f"{symbol}-rls"
-    )
+    item = data.get("stats", {}).get(f"{symbol}-rls")
 
     if not item:
         return None
@@ -128,15 +248,35 @@ def get_nobitex(symbol):
         "price": rial_to_toman(item.get("latest")),
         "buy": rial_to_toman(item.get("bestBuy")),
         "sell": rial_to_toman(item.get("bestSell")),
-        "change_percent": float(
-            item.get("dayChange") or 0
-        ),
+        "change_percent": float(item.get("dayChange") or 0),
     }
 
 
-# =========================
-# قیمت‌ها
-# =========================
+# =========================================================
+# TETHER
+# =========================================================
+
+def get_tether():
+    data = fetch_json(
+        NOBITEX_URL.format("usdt")
+    )
+
+    item = data.get("stats", {}).get("usdt-rls")
+
+    if not item:
+        return None
+
+    return {
+        "price": rial_to_toman(item.get("latest")),
+        "buy": rial_to_toman(item.get("bestBuy")),
+        "sell": rial_to_toman(item.get("bestSell")),
+        "change_percent": float(item.get("dayChange") or 0),
+    }
+
+
+# =========================================================
+# GET ALL PRICES
+# =========================================================
 
 def get_prices():
 
@@ -144,219 +284,512 @@ def get_prices():
 
     prices = {}
 
-    # ارزها
+    # -----------------------------------------------------
+    # Tether
+    # -----------------------------------------------------
+
+    prices["Tether"] = get_tether()
+
+    # -----------------------------------------------------
+    # Currencies
+    # -----------------------------------------------------
+
     prices["دلار آزاد"] = tgju_item(
-        tgju, "price_dollar_rl"
+        tgju,
+        "price_dollar_rl"
     )
 
     prices["یورو"] = tgju_item(
-        tgju, "price_eur"
+        tgju,
+        "price_eur"
     )
 
     prices["درهم"] = tgju_item(
-        tgju, "price_aed"
+        tgju,
+        "price_aed"
     )
 
     prices["لیر ترکیه"] = tgju_item(
-        tgju, "price_try"
+        tgju,
+        "price_try"
     )
 
-    # طلا و سکه
-    prices["طلای ۱۸"] = tgju_item(
-        tgju, "tgju_gold_irg18"
+    prices["یوان چین"] = tgju_item(
+        tgju,
+        "price_cny"
     )
+
+    prices["پوند انگلیس"] = tgju_item(
+        tgju,
+        "price_gbp"
+    )
+
+    prices["دلار کانادا"] = tgju_item(
+        tgju,
+        "price_cad"
+    )
+
+    prices["دلار استرالیا"] = tgju_item(
+        tgju,
+        "price_aud"
+    )
+
+    # -----------------------------------------------------
+    # 100 Iraqi Dinar
+    # -----------------------------------------------------
+
+    iraq = tgju.get("price_iqd")
+
+    if iraq:
+        raw_iqd = clean_price(iraq.get("p"))
+
+        prices["۱۰۰ دینار عراق"] = {
+            "price": (
+                round(raw_iqd * 100)
+                if raw_iqd is not None
+                else None
+            ),
+            "change_percent": float(
+                iraq.get("dp") or 0
+            ),
+        }
+    else:
+        prices["۱۰۰ دینار عراق"] = None
+
+    # -----------------------------------------------------
+    # Afghan Afghani
+    # -----------------------------------------------------
+
+    prices["افغانی"] = tgju_item(
+        tgju,
+        "price_afn"
+    )
+
+    # -----------------------------------------------------
+    # Gold
+    # -----------------------------------------------------
+
+    prices["گرم طلا ۱۸ عیار"] = tgju_item(
+        tgju,
+        "geram18"
+    )
+
+    prices["گرم طلا ۲۴ عیار"] = tgju_item(
+        tgju,
+        "geram24"
+    )
+
+    prices["انس جهانی طلا"] = get_gold_ounce()
+
+    # -----------------------------------------------------
+    # Coins
+    # -----------------------------------------------------
 
     prices["سکه امامی"] = tgju_item(
-        tgju, "sekee"
+        tgju,
+        "sekee"
+    )
+
+    prices["سکه بهار آزادی"] = tgju_item(
+        tgju,
+        "sekeb"
     )
 
     prices["نیم‌سکه"] = tgju_item(
-        tgju, "nim"
+        tgju,
+        "nim"
     )
 
     prices["ربع‌سکه"] = tgju_item(
-        tgju, "rob"
+        tgju,
+        "rob"
     )
 
     prices["سکه گرمی"] = tgju_item(
-        tgju, "gerami"
+        tgju,
+        "gerami"
     )
 
-    # نوبیتکس
-    for name, symbol in [
-        ("تتر", "usdt"),
-        ("بیت‌کوین", "btc"),
-        ("اتریوم", "eth"),
-    ]:
-        try:
-            prices[name] = get_nobitex(symbol)
-        except Exception as error:
-            print(f"⚠️ خطای {name}: {error}")
-            prices[name] = None
+    # -----------------------------------------------------
+    # Crypto
+    # -----------------------------------------------------
+
+    prices["Bitcoin"] = get_nobitex("btc")
+    prices["Ethereum"] = get_nobitex("eth")
+    prices["BNB"] = get_nobitex("bnb")
+    prices["Solana"] = get_nobitex("sol")
+    prices["XRP"] = get_nobitex("xrp")
+    prices["Dogecoin"] = get_nobitex("doge")
+    prices["GRAM"] = get_nobitex("gram")
 
     return prices
 
 
-# =========================
-# ساخت ردیف قیمت
-# =========================
+# =========================================================
+# DATE / TIME
+# =========================================================
 
-def price_row(icon, name, prices):
+def get_jalali_datetime():
 
-    item = prices.get(name)
+    now = datetime.now()
 
-    if not item or item.get("price") is None:
-        return f"{icon} {name}: —"
+    if jdatetime:
+        jnow = jdatetime.datetime.fromgregorian(
+            datetime=now
+        )
+
+        return (
+            jnow.strftime("%Y/%m/%d"),
+            jnow.strftime("%H:%M")
+        )
 
     return (
-        f"{icon} {name}: "
-        f"{format_number(item['price'])} تومان "
-        f"{format_change(item['change_percent'])}"
+        now.strftime("%Y/%m/%d"),
+        now.strftime("%H:%M")
     )
 
 
-# =========================
-# گزارش
-# =========================
+# =========================================================
+# NORMAL REPORT LINE
+# ارزها + طلا + سکه
+# =========================================================
+
+def report_line(
+    icon,
+    name,
+    item,
+    usd=False
+):
+    if not item:
+        return f"{icon} {name}: —"
+
+    price = item.get("price")
+    change = item.get("change_percent", 0)
+
+    if usd:
+        price_text = format_usd(price)
+    else:
+        price_text = format_number(price)
+
+    dot, percent = get_change_dot(change)
+
+    return (
+        f"{icon} {name}: "
+        f"{price_text} {dot} {percent}"
+    )
+
+
+# =========================================================
+# CRYPTO REPORT LINE
+# فقط ارز دیجیتال دارای فلش است
+# =========================================================
+
+def crypto_line(name, item):
+
+    if not item:
+        return f"⚪  {name}: —"
+
+    price = item.get("price")
+    change = item.get("change_percent", 0)
+
+    price_text = format_number(price)
+
+    dot, arrow, percent = get_crypto_change(change)
+
+    if arrow:
+        return (
+            f"{dot}  {name}: "
+            f"{price_text} {arrow} {percent}"
+        )
+
+    return (
+        f"{dot}  {name}: "
+        f"{price_text} {percent}"
+    )
+
+
+# =========================================================
+# BUILD REPORT
+# =========================================================
 
 def build_report():
 
     prices = get_prices()
 
-    now = datetime.now()
-
-    # تاریخ شمسی
-    if jdatetime:
-
-        jalali = jdatetime.datetime.fromgregorian(
-            datetime=now
-        )
-
-        date_text = jalali.strftime("%Y/%m/%d")
-
-    else:
-
-        date_text = now.strftime("%Y/%m/%d")
-
-    time_text = now.strftime("%H:%M")
+    jalali_date, current_time = get_jalali_datetime()
 
     lines = []
 
-    # =========================
-    # تتر
-    # =========================
+    # -----------------------------------------------------
+    # TETHER
+    # -----------------------------------------------------
 
-    lines.append("<b>🪙 تتر</b>")
+    tether = prices.get("Tether")
+
+    lines.append("<b>💵 تتر (تومان)</b>")
     lines.append("")
 
-    tether = prices.get("تتر")
-
     if tether:
-
         lines.append(
-            f"🟢 خرید: "
-            f"{format_number(tether.get('buy'))} تومان"
+            f"🟢 خرید: {format_number(tether.get('buy'))}"
         )
 
         lines.append(
-            f"🔴 فروش: "
-            f"{format_number(tether.get('sell'))} تومان"
+            f"🔴 فروش: {format_number(tether.get('sell'))}"
         )
-
     else:
-
         lines.append("🟢 خرید: —")
         lines.append("🔴 فروش: —")
 
+    lines.append("")
     lines.append("━━━━━━━━━━━━━━━━━━")
     lines.append("")
 
-    # =========================
-    # ارزها
-    # =========================
+    # -----------------------------------------------------
+    # CURRENCIES
+    # -----------------------------------------------------
 
-    lines.append("<b>💱 ارزها</b>")
+    lines.append("<b>💱 ارزها (تومان)</b>")
     lines.append("")
 
     lines.append(
-        price_row("💵", "دلار آزاد", prices)
+        report_line(
+            "💵",
+            "دلار آزاد",
+            prices.get("دلار آزاد")
+        )
     )
 
     lines.append(
-        price_row("💶", "یورو", prices)
+        report_line(
+            "💶",
+            "یورو",
+            prices.get("یورو")
+        )
     )
 
     lines.append(
-        price_row("🇦🇪", "درهم", prices)
+        report_line(
+            "🇦🇪",
+            "درهم",
+            prices.get("درهم")
+        )
     )
 
     lines.append(
-        price_row("🇹🇷", "لیر ترکیه", prices)
+        report_line(
+            "🇹🇷",
+            "لیر ترکیه",
+            prices.get("لیر ترکیه")
+        )
     )
 
+    lines.append(
+        report_line(
+            "🇨🇳",
+            "یوان چین",
+            prices.get("یوان چین")
+        )
+    )
+
+    lines.append(
+        report_line(
+            "🇬🇧",
+            "پوند انگلیس",
+            prices.get("پوند انگلیس")
+        )
+    )
+
+    lines.append(
+        report_line(
+            "🇨🇦",
+            "دلار کانادا",
+            prices.get("دلار کانادا")
+        )
+    )
+
+    lines.append(
+        report_line(
+            "🇦🇺",
+            "دلار استرالیا",
+            prices.get("دلار استرالیا")
+        )
+    )
+
+    lines.append(
+        report_line(
+            "🇮🇶",
+            "۱۰۰ دینار عراق",
+            prices.get("۱۰۰ دینار عراق")
+        )
+    )
+
+    lines.append(
+        report_line(
+            "🇦🇫",
+            "افغانی",
+            prices.get("افغانی")
+        )
+    )
+
+    lines.append("")
     lines.append("━━━━━━━━━━━━━━━━━━")
     lines.append("")
 
-    # =========================
-    # طلا و سکه
-    # =========================
+    # -----------------------------------------------------
+    # GOLD & COINS
+    # -----------------------------------------------------
 
-    lines.append("<b>🥇 طلا و سکه</b>")
+    lines.append("<b>🥇 طلا و سکه (تومان)</b>")
     lines.append("")
 
     lines.append(
-        price_row("🥇", "طلای ۱۸", prices)
+        report_line(
+            "🥇",
+            "گرم طلا ۱۸ عیار",
+            prices.get("گرم طلا ۱۸ عیار")
+        )
     )
 
     lines.append(
-        price_row("🪙", "سکه امامی", prices)
+        report_line(
+            "🥇",
+            "گرم طلا ۲۴ عیار",
+            prices.get("گرم طلا ۲۴ عیار")
+        )
     )
 
     lines.append(
-        price_row("🪙", "نیم‌سکه", prices)
+        report_line(
+            "🌐",
+            "انس جهانی طلا (USD)",
+            prices.get("انس جهانی طلا"),
+            usd=True
+        )
     )
 
     lines.append(
-        price_row("🪙", "ربع‌سکه", prices)
+        report_line(
+            "🟡",
+            "سکه امامی",
+            prices.get("سکه امامی")
+        )
     )
 
     lines.append(
-        price_row("🪙", "سکه گرمی", prices)
+        report_line(
+            "🟡",
+            "سکه بهار آزادی",
+            prices.get("سکه بهار آزادی")
+        )
     )
 
+    lines.append(
+        report_line(
+            "🟡",
+            "نیم‌سکه",
+            prices.get("نیم‌سکه")
+        )
+    )
+
+    lines.append(
+        report_line(
+            "🟡",
+            "ربع‌سکه",
+            prices.get("ربع‌سکه")
+        )
+    )
+
+    lines.append(
+        report_line(
+            "🟡",
+            "سکه گرمی",
+            prices.get("سکه گرمی")
+        )
+    )
+
+    lines.append("")
     lines.append("━━━━━━━━━━━━━━━━━━")
     lines.append("")
 
-    # =========================
-    # ارز دیجیتال
-    # =========================
+    # -----------------------------------------------------
+    # CRYPTO
+    # -----------------------------------------------------
 
-    lines.append("<b>₿ ارزهای دیجیتال</b>")
+    lines.append("<b>💰 ارزهای دیجیتال (تومان)</b>")
     lines.append("")
 
     lines.append(
-        price_row("₿", "بیت‌کوین", prices)
+        crypto_line(
+            "Bitcoin",
+            prices.get("Bitcoin")
+        )
     )
 
     lines.append(
-        price_row("Ξ", "اتریوم", prices)
+        crypto_line(
+            "Ethereum",
+            prices.get("Ethereum")
+        )
     )
 
+    lines.append(
+        crypto_line(
+            "BNB",
+            prices.get("BNB")
+        )
+    )
+
+    lines.append(
+        crypto_line(
+            "Solana",
+            prices.get("Solana")
+        )
+    )
+
+    lines.append(
+        crypto_line(
+            "XRP",
+            prices.get("XRP")
+        )
+    )
+
+    lines.append(
+        crypto_line(
+            "Dogecoin",
+            prices.get("Dogecoin")
+        )
+    )
+
+    lines.append(
+        crypto_line(
+            "GRAM",
+            prices.get("GRAM")
+        )
+    )
+
+    lines.append("")
     lines.append("━━━━━━━━━━━━━━━━━━")
     lines.append("")
 
-    # =========================
-    # تاریخ و ساعت
-    # =========================
+    # -----------------------------------------------------
+    # FOOTER
+    # -----------------------------------------------------
 
     lines.append(
-        f"🕐 {date_text} | {time_text}"
+        f"🕐 {jalali_date} | {current_time}"
     )
+
+    lines.append("")
 
     lines.append("@market_radar_ir")
 
     return "\n".join(lines)
 
+
+# =========================================================
+# TEST
+# =========================================================
 
 if __name__ == "__main__":
     print(build_report())

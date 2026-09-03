@@ -86,15 +86,6 @@ def fetch_nobitex():
     return stats
 
 
-def get_tgju_item(current, key):
-    item = current.get(key)
-
-    if isinstance(item, dict):
-        return item
-
-    return None
-
-
 def find_first_item(current, keys):
     for key in keys:
         item = current.get(key)
@@ -132,11 +123,11 @@ CURRENCIES = {
     ],
 
     "یورو": [
-    "price_eur",
-    "price_eur_rl",
-    "price_euro_rl",
-    "eur_irr",
-],
+        "price_eur",
+        "price_eur_rl",
+        "price_euro_rl",
+        "eur_irr",
+    ],
 
     "درهم": [
         "price_aed_rl",
@@ -212,7 +203,6 @@ def get_gold_and_coins(current):
         ],
     )
 
-    # اونس جهانی طلا
     ounce_keys = [
         "gold_ounce",
         "ounce_gold",
@@ -290,8 +280,6 @@ def get_gold_and_coins(current):
 
 # =========================================================
 # ارزهای دیجیتال
-# SHIB و TON حذف شده‌اند
-# GRAM باقی مانده
 # =========================================================
 
 CRYPTO_PAIRS = {
@@ -375,6 +363,7 @@ def get_tether(stats):
 
 def get_prices():
 
+    # هر بار اجرای این تابع، اطلاعات تازه از API گرفته می‌شود.
     current = fetch_tgju()
     stats = fetch_nobitex()
 
@@ -421,7 +410,6 @@ def format_ounce(value):
 
 # =========================================================
 # درصد معمولی
-# ارز / طلا / سکه
 # =========================================================
 
 def format_normal_change(change):
@@ -440,7 +428,6 @@ def format_normal_change(change):
 
 # =========================================================
 # درصد کریپتو
-# فقط کریپتو فلش دارد
 # =========================================================
 
 def format_crypto_change(change):
@@ -529,7 +516,6 @@ def persian_digits(value):
 # =========================================================
 
 def get_tehran_datetime():
-
     return datetime.now(TEHRAN_TZ)
 
 
@@ -558,6 +544,7 @@ def get_persian_datetime():
 
 def build_report():
 
+    # هر بار build_report اجرا شود، قیمت‌های تازه دریافت می‌شوند.
     p = get_prices()
 
     date_text, time_text = get_persian_datetime()
@@ -681,15 +668,7 @@ def build_report():
         price = item.get("price")
         change = item.get("change_percent")
 
-        if change is None:
-            status = "⚪ → —"
-        elif change > 0:
-            status = f"🟢 ↑ +{change:.2f}%"
-        elif change < 0:
-            status = f"🔴 ↓ {change:.2f}%"
-        else:
-            status = "⚪ → 0.00%"
-
+        status = format_crypto_change(change)
         status_parts = status.split()
 
         lines.append(
@@ -704,7 +683,7 @@ def build_report():
     lines.append("")
 
     # =====================================================
-    # تاریخ و ساعت شمسی تهران
+    # تاریخ و ساعت تهران
     # =====================================================
 
     lines.append(

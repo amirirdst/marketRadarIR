@@ -1,28 +1,31 @@
 # -*- coding: utf-8 -*-
 
+import asyncio
+import sys
+
 from prices import build_report
 from telegram_bot import send_report
-import asyncio
 
 
 async def main():
     print("🚀 Market Radar IR شروع شد.")
     print("🔄 دریافت قیمت‌های جدید...")
 
-    try:
-        report = build_report()
+    report = build_report()
 
-        print(report)
-        print("\n📤 ارسال گزارش به تلگرام...")
+    print(report)
+    print("\n📤 ارسال گزارش به تلگرام...")
 
-        await send_report(report)
+    await send_report(report)
 
-        print("✅ گزارش با موفقیت به تلگرام ارسال شد.")
-
-    except Exception as e:
-        print(f"❌ خطا: {e}")
-        raise
+    print("✅ گزارش با موفقیت به تلگرام ارسال شد.")
+    print("🏁 اجرای این نوبت تمام شد.")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+        sys.exit(0)
+    except Exception as e:
+        print(f"❌ خطا: {e}")
+        sys.exit(1)

@@ -165,7 +165,7 @@ CURRENCIES = {
         "aud_irr",
     ],
 
-    "۱۰۰ دینار عراق": [
+    "دینار عراق": [
         "price_iqd_rl",
         "price_iqd",
         "iqd_100",

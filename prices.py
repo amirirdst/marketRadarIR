@@ -12,6 +12,10 @@ NOBITEX_URL = "https://apiv2.nobitex.ir/market/stats"
 TEHRAN_TZ = ZoneInfo("Asia/Tehran")
 
 
+# =========================================================
+# دریافت JSON
+# =========================================================
+
 def fetch_json(url, timeout=20):
     req = urllib.request.Request(
         url,
@@ -27,6 +31,10 @@ def fetch_json(url, timeout=20):
 
     return json.loads(data)
 
+
+# =========================================================
+# تبدیل مقدار به عدد
+# =========================================================
 
 def to_number(value):
     if value is None:
@@ -49,6 +57,10 @@ def to_number(value):
         return None
 
 
+# =========================================================
+# ریال به تومان
+# =========================================================
+
 def rial_to_toman(value):
     value = to_number(value)
 
@@ -57,6 +69,10 @@ def rial_to_toman(value):
 
     return round(value / 10)
 
+
+# =========================================================
+# دریافت TGJU
+# =========================================================
 
 def fetch_tgju():
     data = fetch_json(TGJU_URL)
@@ -67,10 +83,16 @@ def fetch_tgju():
     current = data.get("current")
 
     if not isinstance(current, dict):
-        raise RuntimeError("بخش current در پاسخ TGJU پیدا نشد.")
+        raise RuntimeError(
+            "بخش current در پاسخ TGJU پیدا نشد."
+        )
 
     return current
 
+
+# =========================================================
+# دریافت Nobitex
+# =========================================================
 
 def fetch_nobitex():
     data = fetch_json(NOBITEX_URL)
@@ -81,10 +103,16 @@ def fetch_nobitex():
     stats = data.get("stats")
 
     if not isinstance(stats, dict):
-        raise RuntimeError("بخش stats در پاسخ Nobitex پیدا نشد.")
+        raise RuntimeError(
+            "بخش stats در پاسخ Nobitex پیدا نشد."
+        )
 
     return stats
 
+
+# =========================================================
+# پیدا کردن اولین کلید معتبر
+# =========================================================
 
 def find_first_item(current, keys):
     for key in keys:
@@ -96,6 +124,10 @@ def find_first_item(current, keys):
     return None, None
 
 
+# =========================================================
+# ساخت قیمت از TGJU
+# =========================================================
+
 def make_from_keys(current, keys):
     key, item = find_first_item(current, keys)
 
@@ -103,6 +135,7 @@ def make_from_keys(current, keys):
         return {
             "price": None,
             "change_percent": None,
+            "source_key": None,
         }
 
     return {
@@ -165,10 +198,9 @@ CURRENCIES = {
         "aud_irr",
     ],
 
-    "۱۰۰ دینار عراق": [
+    "دینار عراق": [
         "price_iqd_rl",
         "price_iqd",
-        "iqd_100",
         "iqd_irr",
     ],
 
@@ -188,14 +220,15 @@ def get_gold_and_coins(current):
 
     result = {}
 
+    # گرم طلای ۱۸ عیار
     result["گرم طلا ۱۸ عیار"] = make_from_keys(
-        current,
-        [
-            "tgju_gold_irg18",
-            "geram18",
-        ],
-    )
+    current,
+    [
+        "geram18",
+    ],
+)
 
+    # گرم طلای ۲۴ عیار
     result["گرم طلا ۲۴ عیار"] = make_from_keys(
         current,
         [
@@ -203,6 +236,7 @@ def get_gold_and_coins(current):
         ],
     )
 
+    # انس جهانی طلا
     ounce_keys = [
         "gold_ounce",
         "ounce_gold",
@@ -229,8 +263,10 @@ def get_gold_and_coins(current):
         result["انس جهانی طلا (USD)"] = {
             "price": None,
             "change_percent": None,
+            "source_key": None,
         }
 
+    # سکه امامی
     result["سکه امامی"] = make_from_keys(
         current,
         [
@@ -239,6 +275,7 @@ def get_gold_and_coins(current):
         ],
     )
 
+    # سکه بهار آزادی
     result["سکه بهار آزادی"] = make_from_keys(
         current,
         [
@@ -247,6 +284,7 @@ def get_gold_and_coins(current):
         ],
     )
 
+    # نیم سکه
     result["نیم‌سکه"] = make_from_keys(
         current,
         [
@@ -257,6 +295,7 @@ def get_gold_and_coins(current):
         ],
     )
 
+    # ربع سکه
     result["ربع‌سکه"] = make_from_keys(
         current,
         [
@@ -267,6 +306,7 @@ def get_gold_and_coins(current):
         ],
     )
 
+    # سکه گرمی
     result["سکه گرمی"] = make_from_keys(
         current,
         [
@@ -358,29 +398,89 @@ def get_tether(stats):
 
 
 # =========================================================
+# دینار عراق
+# =========================================================
+
+def get_iraqi_dinar(current):
+
+    keys = [
+        "price_iqd_rl",
+        "price_iqd",
+        "iqd_irr",
+    ]
+
+    key, item = find_first_item(current, keys)
+
+    if not item:
+        return {
+            "price": None,
+            "change_percent": None,
+            "source_key": None,
+        }
+
+    raw_price = to_number(item.get("p"))
+
+    if raw_price is None:
+        price = None
+    else:
+        # قیمت منبع برای 100 دینار است:
+        # ریال -> تومان و سپس تقسیم بر 100
+        price = raw_price / 1000
+
+    return {
+        "price": price,
+        "change_percent": to_number(item.get("dp")),
+        "source_key": key,
+    }
+
+    raw_price = to_number(item.get("p"))
+
+    if raw_price is None:
+        price = None
+    else:
+        # TGJU این مقدار را برای 100 دینار عراق می‌دهد.
+        # تبدیل ریال به تومان + تقسیم بر 100
+        # نتیجه = قیمت یک دینار عراق
+        price = round(raw_price / 1000, 2)
+
+    return {
+        "price": price,
+        "change_percent": to_number(item.get("dp")),
+        "source_key": source_key,
+    }
+
+
+# =========================================================
 # دریافت همه قیمت‌ها
 # =========================================================
 
 def get_prices():
 
-    # هر بار اجرای این تابع، اطلاعات تازه از API گرفته می‌شود.
     current = fetch_tgju()
     stats = fetch_nobitex()
 
     prices = {}
 
+    # تتر
     prices["تتر"] = get_tether(stats)
 
+    # ارزها
     for name, keys in CURRENCIES.items():
-        prices[name] = make_from_keys(
-            current,
-            keys,
-        )
 
+        if name == "دینار عراق":
+            prices[name] = get_iraqi_dinar(current)
+        else:
+            prices[name] = make_from_keys(
+                current,
+                keys,
+            )
+
+    # طلا و سکه
     prices.update(
         get_gold_and_coins(current)
     )
 
+    # کریپتو
     prices.update(
         get_crypto_data(stats)
     )
@@ -397,8 +497,15 @@ def format_price(value):
     if value is None:
         return "—"
 
+    if isinstance(value, float) and not value.is_integer():
+        return f"{value:,.2f}"
+
     return f"{int(round(value)):,}"
 
+
+# =========================================================
+# فرمت انس
+# =========================================================
 
 def format_ounce(value):
 
@@ -445,7 +552,7 @@ def format_crypto_change(change):
 
 
 # =========================================================
-# تبدیل میلادی به شمسی
+# تبدیل میلادی به شمسی - نسخه صحیح
 # =========================================================
 
 def gregorian_to_jalali(gy, gm, gd):
@@ -456,46 +563,58 @@ def gregorian_to_jalali(gy, gm, gd):
     ]
 
     gy2 = gy - 1600
-    jy = 979
+    gm2 = gm - 1
+    gd2 = gd - 1
 
-    gy_days = (
+    g_day_no = (
         365 * gy2
         + (gy2 + 3) // 4
         - (gy2 + 99) // 100
         + (gy2 + 399) // 400
     )
 
-    for i in range(gm - 1):
-        gy_days += g_days_in_month[i]
+    for i in range(gm2):
+        g_day_no += g_days_in_month[i]
 
     if (
-        gm > 2
-        and gy % 4 == 0
-        and (gy % 100 != 0 or gy % 400 == 0)
+        gm2 > 1
+        and (
+            gy % 4 == 0
+            and (
+                gy % 100 != 0
+                or gy % 400 == 0
+            )
+        )
     ):
-        gy_days += 1
+        g_day_no += 1
 
-    gy_days += gd - 1
+    g_day_no += gd2
 
-    jy += 33 * (gy_days // 12053)
-    gy_days %= 12053
+    j_day_no = g_day_no - 79
 
-    jy += 4 * (gy_days // 1461)
-    gy_days %= 1461
+    j_np = j_day_no // 12053
+    j_day_no %= 12053
 
-    if gy_days > 365:
-        jy += (gy_days - 1) // 365
-        gy_days = (gy_days - 1) % 365
+    jy = (
+        979
+        + 33 * j_np
+        + 4 * (j_day_no // 1461)
+    )
 
-    if gy_days < 186:
-        jm = 1 + gy_days // 31
-        jd = 1 + gy_days % 31
+    j_day_no %= 1461
+
+    if j_day_no >= 366:
+        jy += (j_day_no - 1) // 365
+        j_day_no = (j_day_no - 1) % 365
+
+    if j_day_no < 186:
+        jm = 1 + j_day_no // 31
+        jd = 1 + j_day_no % 31
     else:
-        jm = 7 + (gy_days - 186) // 30
-        jd = 1 + (gy_days - 186) % 30
+        jm = 7 + (j_day_no - 186) // 30
+        jd = 1 + (j_day_no - 186) % 30
 
     return jy, jm, jd
-
 
 # =========================================================
 # اعداد فارسی
@@ -516,6 +635,7 @@ def persian_digits(value):
 # =========================================================
 
 def get_tehran_datetime():
+
     return datetime.now(TEHRAN_TZ)
 
 
@@ -529,8 +649,13 @@ def get_persian_datetime():
         now.day,
     )
 
-    date_text = f"{jy:04d}/{jm:02d}/{jd:02d}"
-    time_text = f"{now.hour:02d}:{now.minute:02d}"
+    date_text = (
+        f"{jy:04d}/{jm:02d}/{jd:02d}"
+    )
+
+    time_text = (
+        f"{now.hour:02d}:{now.minute:02d}"
+    )
 
     return (
         persian_digits(date_text),
@@ -544,7 +669,6 @@ def get_persian_datetime():
 
 def build_report():
 
-    # هر بار build_report اجرا شود، قیمت‌های تازه دریافت می‌شوند.
     p = get_prices()
 
     date_text, time_text = get_persian_datetime()
@@ -588,7 +712,7 @@ def build_report():
         "پوند انگلیس": "🇬🇧",
         "دلار کانادا": "🇨🇦",
         "دلار استرالیا": "🇦🇺",
-        "۱۰۰ دینار عراق": "🇮🇶",
+        "دینار عراق": "🇮🇶",
         "افغانی": "🇦🇫",
     }
 
@@ -596,7 +720,10 @@ def build_report():
 
         item = p.get(name, {})
 
-        icon = currency_icons.get(name, "💱")
+        icon = currency_icons.get(
+            name,
+            "💱",
+        )
 
         price = item.get("price")
         change = item.get("change_percent")
@@ -615,7 +742,10 @@ def build_report():
     # طلا و سکه
     # =====================================================
 
-    lines.append("<b>🥇 طلا و سکه (تومان)</b>")
+    lines.append(
+        "<b>🥇 طلا و سکه (تومان)</b>"
+    )
+
     lines.append("")
 
     gold_items = [
@@ -655,7 +785,10 @@ def build_report():
     # کریپتو
     # =====================================================
 
-    lines.append("<b>💰 ارزهای دیجیتال (تومان)</b>")
+    lines.append(
+        "<b>💰 ارزهای دیجیتال (تومان)</b>"
+    )
+
     lines.append("")
 
     for name in CRYPTO_PAIRS:
@@ -672,7 +805,7 @@ def build_report():
         status_parts = status.split()
 
         lines.append(
-            f"{status_parts[0]}  "
+            f"{status_parts[0]} "
             f"{name}: "
             f"{format_price(price)} "
             f"{' '.join(status_parts[1:])}"
@@ -691,6 +824,7 @@ def build_report():
     )
 
     lines.append("")
+
     lines.append("@market_radar_ir")
 
     return "\n".join(lines)

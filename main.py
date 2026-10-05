@@ -106,10 +106,17 @@ async def main():
             await asyncio.sleep(5)
 
 
+async def main_once():
+    await run_once()
+
+
 if __name__ == "__main__":
 
     try:
-        asyncio.run(main())
+        if "--once" in sys.argv:
+            asyncio.run(main_once())
+        else:
+            asyncio.run(main())
 
     except KeyboardInterrupt:
 

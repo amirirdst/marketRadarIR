@@ -1,9 +1,6 @@
 name: Market Radar IR
 
 on:
-  push:
-    branches: [main]
-
   workflow_dispatch:
 
   # به‌جای اینکه GitHub هر 10 دقیقه یک Runner جدید بسازد،

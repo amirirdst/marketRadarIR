@@ -3,14 +3,23 @@ name: Market Radar IR
 on:
   workflow_dispatch:
 
+  # به‌جای اینکه GitHub هر 10 دقیقه یک Runner جدید بسازد،
+  # هر 6 ساعت یک Runner را بالا می‌آوریم و خود برنامه هر 10 دقیقه اجرا می‌شود.
   schedule:
-    - cron: "3-59/10 * * * *"
+    - cron: "7 0,6,12,18 * * *"
       timezone: "Asia/Tehran"
+
+# فقط یک اجرای دائمی از رادار هم‌زمان فعال باشد.
+concurrency:
+  group: market-radar-production
+  cancel-in-progress: true
 
 jobs:
   market-radar:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+
+    # GitHub-hosted runner حداکثر 6 ساعت اجازه اجرای Job دارد.
+    timeout-minutes: 355
 
     steps:
       - name: Checkout
@@ -31,4 +40,8 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
         run: |
-          python main.py --once
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            python main.py --once
+          else
+            python main.py
+          fi

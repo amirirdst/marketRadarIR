@@ -3,7 +3,7 @@ name: Market Radar IR
 on:
   push:
     branches:
-      - main
+      - runner-start
 
   workflow_dispatch:
 

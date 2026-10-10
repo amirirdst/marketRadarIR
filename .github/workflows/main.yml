@@ -3,10 +3,6 @@ name: Market Radar IR
 on:
   workflow_dispatch:
 
-  # اجرای آزمایشی پس از اصلاح زمان‌بندی
-  push:
-    branches: [main]
-
   # اجرای کوتاه هر ۱۰ دقیقه؛ در دقیقه‌های غیرصفر برای کاهش تأخیر زمان‌بندی.
   schedule:
     - cron: "3,13,23,33,43,53 * * * *"

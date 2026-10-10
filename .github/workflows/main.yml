@@ -1,10 +1,6 @@
 name: Market Radar IR
 
 on:
-  push:
-    branches:
-      - main
-
   workflow_dispatch:
 
   # هر ۱۰ دقیقه یک اجرای کوتاه؛ بدون Runner دائمی که پس از ۶ ساعت لغو شود.

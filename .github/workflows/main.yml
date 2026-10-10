@@ -3,22 +3,19 @@ name: Market Radar IR
 on:
   push:
     branches:
-      - runner-start
+      - main
 
   workflow_dispatch:
 
+  # هر ۱۰ دقیقه یک اجرای کوتاه؛ بدون Runner دائمی که پس از ۶ ساعت لغو شود.
   schedule:
-    - cron: "7 0,6,12,18 * * *"
+    - cron: "*/10 * * * *"
       timezone: "Asia/Tehran"
-
-concurrency:
-  group: market-radar-production
-  cancel-in-progress: true
 
 jobs:
   market-radar:
     runs-on: ubuntu-latest
-    timeout-minutes: 355
+    timeout-minutes: 5
 
     steps:
       - name: Checkout
@@ -34,13 +31,8 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
-      - name: Run Market Radar
+      - name: Send one report
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            python main.py --once
-          else
-            python main.py
-          fi
+        run: python main.py --once
